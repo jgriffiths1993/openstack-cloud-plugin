@@ -24,6 +24,9 @@ import org.openstack4j.model.image.Image;
  */
 public class ImageIdImageSelector extends OpenStackImageSelector {
 
+    private static final Logger LOGGER = 
+        Logger.getLogger(ImageIdImageSelector.class.getName());
+
     private String imageId;
 
     @DataBoundConstructor
@@ -83,7 +86,7 @@ public class ImageIdImageSelector extends OpenStackImageSelector {
             } catch (AuthenticationException _) {
                 // Incorrect credentials - noop
             } catch (Exception ex) {
-                //LOGGER.log(Level.SEVERE, ex.getMessage(), ex);
+                LOGGER.log(Level.SEVERE, ex.getMessage(), ex);
             }
 
             if (Util.fixEmpty(imageId) != null) {
