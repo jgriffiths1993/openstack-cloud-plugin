@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core"
          xmlns:f="/lib/form" xmlns:c="/lib/credentials">
@@ -12,8 +13,8 @@
     </f:section>
 
     <f:section title="Cloud Server Options">
-        <f:entry title="Image" field="imageId">
-            <f:select />
+        <f:entry title="">
+            <f:hetero-radio field="selector" descriptors="${descriptor.selectors()}" />
         </f:entry>
         <f:entry title="Hardware" field="hardwareId">
             <f:select />
@@ -22,7 +23,7 @@
             <f:select />
         </f:entry>
         <f:entry title="${%SSH Credentials}" field="credentialsId">
-            <c:select/>
+            <c:select />
         </f:entry>
     </f:section>
 

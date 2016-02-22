@@ -3,6 +3,7 @@ package jenkins.plugins.openstack.compute;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.logging.Level;
@@ -63,8 +64,8 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
     private static final Logger LOGGER = Logger.getLogger(JCloudsSlaveTemplate.class.getName());
     private static final char SEPARATOR_CHAR = ',';
 
+    private final OpenStackImageSelector selector;
     public final String name;
-    public String imageId;
     public String hardwareId;
     public final String labelString;
     public final String userDataId;
@@ -83,14 +84,25 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
     private transient Set<LabelAtom> labelSet;
 
     @DataBoundConstructor
-    public JCloudsSlaveTemplate(final String name, final String imageId, final String hardwareId,
-                                final String labelString, final String userDataId, final String numExecutors,
-                                final String jvmOptions, final String fsRoot, final boolean installPrivateKey,
-                                final int overrideRetentionTime, final String keyPairName, final String networkId,
-                                final String securityGroups, final String credentialsId, final JCloudsCloud.SlaveType slaveType, final String availabilityZone) {
+    public JCloudsSlaveTemplate(final String name, 
+                                final OpenStackImageSelector selector,
+                                final String hardwareId,
+                                final String labelString, 
+                                final String userDataId, 
+                                final String numExecutors,
+                                final String jvmOptions, 
+                                final String fsRoot, 
+                                final boolean installPrivateKey,
+                                final int overrideRetentionTime, 
+                                final String keyPairName, 
+                                final String networkId,
+                                final String securityGroups, 
+                                final String credentialsId, 
+                                final JCloudsCloud.SlaveType slaveType, 
+                                final String availabilityZone) {
 
         this.name = Util.fixEmptyAndTrim(name);
-        this.imageId = Util.fixEmptyAndTrim(imageId);
+        this.selector = selector;
         this.hardwareId = Util.fixEmptyAndTrim(hardwareId);
         this.labelString = Util.fixNull(labelString);
         this.numExecutors = Util.fixNull(numExecutors);
@@ -125,10 +137,6 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
             networkId = networkId.substring(i + 1);
         }
 
-        if ((i = imageId.indexOf('/')) != -1) {
-            imageId = imageId.substring(i + 1);
-        }
-
         return this;
     }
 
@@ -138,6 +146,10 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
         } else {
             return jvmOptions;
         }
+    }
+
+    public OpenStackImageSelector getSelector() {
+        return selector;
     }
 
     public int getNumExecutors() {
@@ -186,12 +198,17 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
      * @throws Openstack.ActionFailed In case the provisioning failed.
      * @see #provisionSlave(JCloudsCloud, TaskListener)
      */
-    public @Nonnull Server provision(@Nonnull JCloudsCloud cloud) throws Openstack.ActionFailed {
+    public @Nonnull Server provision(@Nonnull JCloudsCloud cloud) 
+        throws Openstack.ActionFailed {
+
         final ServerCreateBuilder builder = Builders.server();
         final String nodeName = name + "-" + System.currentTimeMillis() % 1000;
+
         LOGGER.info("Provisioning new openstack node " + nodeName);
         // Ensure predictable node name so we can inject it into user data
         builder.name(nodeName);
+
+        String imageId = selector.getOpenStackImageId(cloud);
 
         if (!Strings.isNullOrEmpty(imageId)) {
             LOGGER.fine("Setting image id to " + imageId);
@@ -252,7 +269,9 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
     }
 
     /*package for testing*/ @CheckForNull String getUserData() {
-        Config userData = ConfigProvider.all().get(UserDataConfig.UserDataConfigProvider.class).getConfigById(userDataId);
+        Config userData = ConfigProvider.all().get(
+                UserDataConfig.UserDataConfigProvider.class
+                ).getConfigById(userDataId);
 
         return (userData == null || userData.content.isEmpty())
                 ? null
@@ -262,7 +281,9 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
 
     private static String[] csvToArray(final String csv) {
         try {
-            final CSVReader reader = new CSVReader(new StringReader(csv), SEPARATOR_CHAR);
+            final CSVReader reader = 
+                new CSVReader(new StringReader(csv), SEPARATOR_CHAR);
+
             final String[] line = reader.readNext();
             return (line != null) ? line : new String[0];
         } catch (Exception e) {
@@ -277,12 +298,20 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
     }
 
     @Extension
-    public static final class DescriptorImpl extends Descriptor<JCloudsSlaveTemplate> {
-        private static final Pattern NAME_PATTERN = Pattern.compile("[a-z0-9][-a-zA-Z0-9]{0,79}");
+    public static final class DescriptorImpl 
+        extends Descriptor<JCloudsSlaveTemplate> {
+
+        private static final Pattern NAME_PATTERN = 
+            Pattern.compile("[a-z0-9][-a-zA-Z0-9]{0,79}");
 
         @Override
         public String getDisplayName() {
             return null;
+        }
+
+        public Collection<Descriptor<OpenStackImageSelector>> selectors() {
+            return Jenkins.getInstance()
+                          .getDescriptorList(OpenStackImageSelector.class);
         }
 
         @Restricted(DoNotUse.class)
@@ -334,36 +363,6 @@ public class JCloudsSlaveTemplate implements Describable<JCloudsSlaveTemplate> {
 
             if (Util.fixEmpty(hardwareId) != null) {
                 m.add(hardwareId);
-            }
-
-            return m;
-        }
-
-        @Restricted(DoNotUse.class)
-        public ListBoxModel doFillImageIdItems(@QueryParameter String imageId,
-                                               @RelativePath("..") @QueryParameter String endPointUrl,
-                                               @RelativePath("..") @QueryParameter String identity,
-                                               @RelativePath("..") @QueryParameter String credential,
-                                               @RelativePath("..") @QueryParameter String zone
-        ) {
-
-            ListBoxModel m = new ListBoxModel();
-            m.add("None specified", "");
-
-            try {
-                final Openstack openstack = JCloudsCloud.getOpenstack(endPointUrl, identity, credential, zone);
-                for (Image image : openstack.getSortedImages()) {
-                    m.add(String.format("%s (%s)", image.getName(), image.getId()), image.getId());
-                }
-                return m;
-            } catch (AuthenticationException _) {
-                // Incorrect credentials - noop
-            } catch (Exception ex) {
-                LOGGER.log(Level.SEVERE, ex.getMessage(), ex);
-            }
-
-            if (Util.fixEmpty(imageId) != null) {
-                m.add(imageId);
             }
 
             return m;
